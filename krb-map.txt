@@ -1,0 +1,49 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: krb-map
+  namespace: dynatrace
+data:
+  browser-kerberos: |-
+    #!/bin/bash
+    if [[ $@ != *'--version'* ]]
+    then
+        export KRB5CCNAME="FILE:$SYNTHETIC_VISIT_HOME/krb5cc"
+        ### This is an example kinit call, please modify it to your requirements
+        usernameFile=/var/lib/dynatrace/secrets/user-creds/username
+        passwordFile=/var/lib/dynatrace/secrets/user-creds/password
+        kinit "$(cat ${usernameFile} )@TESTING.LOCAL" < "${passwordFile}"
+    fi
+    exec /opt/dynatrace/synthetic/browser "$@"
+  kerberos.json: |-
+    {
+        "AuthServerAllowlist": "*.testing.local",
+        "AuthNegotiateDelegateAllowlist": "*.testing.local"
+    }
+  krb5.conf: |-
+    includedir /etc/krb5.conf.d/
+    [logging]
+        default = FILE:/var/log/krb5libs.log
+        kdc = FILE:/var/log/krb5kdc.log
+        admin_server = FILE:/var/log/kadmind.log
+    [libdefaults]
+        dns_lookup_realm = false
+        ticket_lifetime = 24h
+        renew_lifetime = 7d
+        forwardable = true
+        rdns = false
+        pkinit_anchors = FILE:/etc/pki/tls/certs/ca-bundle.crt
+        spake_preauth_groups = edwards25519
+        default_realm = TESTING.LOCAL
+        default_ccache_name = KEYRING:persistent:%{uid}
+    [realms]
+        TESTING.LOCAL = {
+            kdc = testing.local
+            admin_server = testing.local
+        }
+    [domain_realm]
+        testing.local = TESTING.LOCAL
+        .testing.local = TESTING.LOCAL
+  user.properties: |-
+    com.ruxit.vuc.poolConfig.playerConfig.additionalStartupParams=--auth-server-allowlist="*.testing.local"
+    com.ruxit.vuc.poolConfig.playerConfig.cmd=/opt/dynatrace/synthetic/browser-kerberos

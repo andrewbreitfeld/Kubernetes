@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dynatrace-activegate-workload
+  namespace: default
+  labels:
+    activegate: azure
+    syntheticLocationId: SYNTHETIC_LOCATION-8EBFE12EDA65393C
+spec:
+  selector:
+    matchLabels:
+      syntheticLocationId: SYNTHETIC_LOCATION-8EBFE12EDA65393C
+  serviceName: ""
+  volumeClaimTemplates:
+    - metadata:
+        name: persistent-storage
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 3Gi
+  template:
+    metadata:
+      labels:
+        activegate: azure
+    spec:
+      securityContext:
+        runAsUser: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: "OnRootMismatch"
+      volumes:
+        - name: dynatrace-tokens
+          secret:
+            secretName: dynatrace-tokens
+        - name: shared-tmp-storage
+          emptyDir:
+            sizeLimit: 10Mi
+        - name: ag-tmp-storage
+          emptyDir:
+            sizeLimit: 1Gi
+      terminationGracePeriodSeconds: 400
+      imagePullSecrets:
+        - name: dynatrace-docker-registry
+      containers:
+        - name: activegate
+          image: <env_placeholder>/linux/activegate:raw
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: dynatrace-tokens
+              mountPath: /var/lib/dynatrace/secrets/tokens
+              readOnly: true
+            - name: persistent-storage
+              mountPath: /var/log/dynatrace/gateway
+              subPath: ag-log
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/gateway/config
+              subPath: ag-config
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/gateway/ssl
+              subPath: ag-ssl
+            - name: ag-tmp-storage
+              mountPath: /var/tmp/dynatrace/gateway
+              subPath: ag-tmp
+          env:
+            - name: DT_LOCATION_ID
+              value: SYNTHETIC_LOCATION-8EBFE12EDA65393C
+            - name: DT_TENANT
+              value: eyq72407
+            - name: DT_SERVER
+              value: <dt_server_placeholder>
+            - name: DT_ID_SEED_NAMESPACE
+              value: default
+            - name: DT_ID_SEED_K8S_CLUSTER_ID
+              value: 18d7f424ac50.4e8a3e25
+            - name: DT_CAPABILITIES
+              value: <ag_module_placeholder>
+          resources:
+            limits:
+              cpu: 300m
+              memory: 1Gi
+            requests:
+              cpu: 150m
+              memory: 250Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            privileged: false
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["all"]
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            failureThreshold: 2
+            httpGet:
+              path: /rest/state
+              port: 9999
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /rest/health
+              port: 9999
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            successThreshold: 1
+            timeoutSeconds: 1

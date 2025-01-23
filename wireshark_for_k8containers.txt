@@ -1,0 +1,33 @@
+The following Wireshark service is appended after the Stateful Set definition in the synthetic.yaml (replace $LOCATION_ID placeholder):
+apiVersion: v1
+kind: Service
+metadata:
+  name: wireshark-service
+  namespace: cp-6632987
+spec:
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000
+  type: LoadBalancer
+  selector:
+    syntheticLocationId: $LOCATION_ID
+
+
+The following Wireshark container is appended after vuc-worker containers in the synthetic.yaml:
+        - name: wireshark
+          image: lscr.io/linuxserver/wireshark:latest
+          securityContext:
+            readOnlyRootFilesystem: false
+            privileged: true
+            runAsUser: 0
+            capabilities:
+              drop: ["all"]
+              add: ["NET_ADMIN", "NET_RAW", "CHOWN", "AUDIT_WRITE", "DAC_OVERRIDE", "FOWNER", "FSETID", "MKNOD", "NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"]
+          ports:
+          - containerPort: 3000
+            name: http
+---
+
+
+The endpoint address can be checked by running the "oc get svc" command.

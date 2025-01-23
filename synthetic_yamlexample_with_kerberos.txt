@@ -1,0 +1,364 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dynatrace-activegate-synthetic
+  namespace: dynatrace
+  labels:
+    activegate: synthetic
+    syntheticLocationId: SYNTHETIC_LOCATION-13C80238C1DF1F0F
+spec:
+  selector:
+    matchLabels:
+      syntheticLocationId: SYNTHETIC_LOCATION-13C80238C1DF1F0F
+  serviceName: ""
+  volumeClaimTemplates:
+    - metadata:
+        name: persistent-storage
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 3Gi
+  template:
+    metadata:
+      labels:
+        activegate: synthetic
+        syntheticLocationId: SYNTHETIC_LOCATION-13C80238C1DF1F0F
+    spec:
+      securityContext:
+        runAsUser: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: "OnRootMismatch"
+      volumes:
+        - name: chromium-cache
+          emptyDir:
+            sizeLimit: 1Gi
+            medium: Memory
+        - name: user-creds
+          secret:
+            secretName: user-creds
+        - name: dynatrace-tokens
+          secret:
+            secretName: dynatrace-tokens
+        - name: shared-tmp-storage
+          emptyDir:
+            sizeLimit: 10Mi
+        - name: ag-tmp-storage
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: synthetic-custom
+          configMap:
+            name: krb-map
+            items:
+            - key: user.properties
+              path: user.properties
+        - name: krb5-conf
+          configMap:
+            name: krb-map
+            items:
+            - key: krb5.conf
+              path: krb5.conf
+        - name: kerberos-json
+          configMap:
+            name: krb-map
+            items:
+            - key: kerberos.json
+              path: kerberos.json
+        - name: browser-kerberos
+          configMap:
+            name: krb-map
+            items:
+            - key: browser-kerberos
+              path: browser-kerberos
+              mode: 0755
+      terminationGracePeriodSeconds: 390
+      imagePullSecrets:
+        - name: dynatrace-docker-registry
+      containers:
+        - name: activegate
+          image: <registryplaceholder>/activegate/dynatrace-activegate:1.302.0.20240912-111835
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: dynatrace-tokens
+              mountPath: /var/lib/dynatrace/secrets/tokens
+              readOnly: true
+            - name: persistent-storage
+              mountPath: /var/log/dynatrace/gateway
+              subPath: ag-log
+            - name: persistent-storage
+              mountPath: /var/log/dynatrace/synthetic
+              subPath: syn-log
+              readOnly: true
+            - name: persistent-storage
+              mountPath: /var/tmp/dynatrace/synthetic
+              subPath: syn-tmp
+              readOnly: true
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/gateway/config
+              subPath: ag-config
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/gateway/ssl
+              subPath: ag-ssl
+            - name: ag-tmp-storage
+              mountPath: /var/tmp/dynatrace/gateway
+              subPath: ag-tmp
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/synthetic/config
+              subPath: vuc-config
+              readOnly: true
+          env:
+            - name: DT_LOCATION_ID
+              value: SYNTHETIC_LOCATION-13C80238C1DF1F0F
+            - name: DT_TENANT
+              value: dry61925
+            - name: DT_SERVER
+              value: <dtserverplaceholder>
+            - name: DT_ID_SEED_NAMESPACE
+              value: dynatrace
+            - name: DT_ID_SEED_K8S_CLUSTER_ID
+              value: 1919e5823010.23493aad
+            - name: DT_CAPABILITIES
+              value: synthetic,beacon_forwarder,beacon_forwarder_synthetic
+          resources:
+            limits:
+              cpu: 300m
+              memory: 1Gi
+            requests:
+              cpu: 150m
+              memory: 250Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            privileged: false
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["all"]
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            failureThreshold: 2
+            httpGet:
+              path: /rest/state
+              port: 9999
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /rest/health
+              port: 9999
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            successThreshold: 1
+            timeoutSeconds: 1
+        - name: synthetic-vuc
+          image: <registryplaceholder>/synthetic/dynatrace-synthetic-vuc:1.302.0.20240916-134742
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: persistent-storage
+              mountPath: /var/log/dynatrace/synthetic
+              subPath: syn-log
+            - name: persistent-storage
+              mountPath: /var/tmp/dynatrace/synthetic
+              subPath: syn-tmp
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/gateway/config
+              subPath: ag-config
+              readOnly: true
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/synthetic/config
+              subPath: vuc-config
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/gateway/ssl
+              subPath: ag-ssl
+            - name: synthetic-custom
+              mountPath: /var/lib/dynatrace/synthetic/config_template/user.properties
+              subPath: user.properties
+          env:
+            - name: DT_MAX_HEAP_MEMORY
+              value: 700m
+            - name: DT_NODE_SIZE
+              value: XS
+          resources:
+            limits:
+              cpu: 500m
+              memory: 2Gi
+            requests:
+              cpu: 250m
+              memory: 1Gi
+          securityContext:
+            readOnlyRootFilesystem: true
+            privileged: false
+            allowPrivilegeEscalation: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["all"]
+              add: ["NET_RAW"]
+            seccompProfile:
+              type: RuntimeDefault
+          # currently the only way to access the endpoint is from the inside of the container
+          livenessProbe:
+            exec:
+              command:
+                - curl
+                - http://localhost:7878/command/version
+            failureThreshold: 2
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 5
+        - name: synthetic-vuc-worker-1
+          image: <registryplaceholder>/synthetic/dynatrace-synthetic-vuc-worker:1.302.0.20240916-134742
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: user-creds
+              mountPath: /var/lib/dynatrace/secrets/user-creds
+              readOnly: true
+            - name: chromium-cache
+              mountPath: /var/tmp/dynatrace/synthetic/cache
+            - name: persistent-storage
+              mountPath: /var/log/dynatrace/synthetic
+              subPath: syn-log
+            - name: persistent-storage
+              mountPath: /var/tmp/dynatrace/synthetic
+              subPath: syn-tmp
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/synthetic/config
+              subPath: vuc-config
+              readOnly: true
+            - name: shared-tmp-storage
+              mountPath: /tmp
+              subPath: xvfb-tmp
+            - name: shared-tmp-storage
+              mountPath: /etc/chromium/policies/recommended
+              subPath: vuc-worker-1
+            - name: browser-kerberos
+              mountPath: /opt/dynatrace/synthetic/browser-kerberos
+              subPath: browser-kerberos
+            - name: kerberos-json
+              mountPath: /etc/chromium/policies/managed/kerberos.json
+              subPath: kerberos.json
+            - name: krb5-conf
+              mountPath: /etc/krb5.conf
+              subPath: krb5.conf
+          env:
+            - name: DT_MAX_HEAP_MEMORY
+              value: 64m
+            - name: SYNTHETIC_WORKER_ID
+              value: vuc-worker-1
+          resources:
+            limits:
+              cpu: 1500m
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          securityContext:
+            readOnlyRootFilesystem: true
+            privileged: false
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["all"]
+            seccompProfile:
+              type: RuntimeDefault
+        - name: synthetic-vuc-worker-2
+          image: <registryplaceholder>/synthetic/dynatrace-synthetic-vuc-worker:1.302.0.20240916-134742
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: user-creds
+              mountPath: /var/lib/dynatrace/secrets/user-creds
+              readOnly: true
+            - name: chromium-cache
+              mountPath: /var/tmp/dynatrace/synthetic/cache
+            - name: persistent-storage
+              mountPath: /var/log/dynatrace/synthetic
+              subPath: syn-log
+            - name: persistent-storage
+              mountPath: /var/tmp/dynatrace/synthetic
+              subPath: syn-tmp
+            - name: shared-tmp-storage
+              mountPath: /var/lib/dynatrace/synthetic/config
+              subPath: vuc-config
+              readOnly: true
+            - name: shared-tmp-storage
+              mountPath: /tmp
+              subPath: xvfb-tmp
+            - name: shared-tmp-storage
+              mountPath: /etc/chromium/policies/recommended
+              subPath: vuc-worker-2
+            - name: browser-kerberos
+              mountPath: /opt/dynatrace/synthetic/browser-kerberos
+              subPath: browser-kerberos
+            - name: kerberos-json
+              mountPath: /etc/chromium/policies/managed/kerberos.json
+              subPath: kerberos.json
+            - name: krb5-conf
+              mountPath: /etc/krb5.conf
+              subPath: krb5.conf
+          env:
+            - name: DT_MAX_HEAP_MEMORY
+              value: 64m
+            - name: SYNTHETIC_WORKER_ID
+              value: vuc-worker-2
+          resources:
+            limits:
+              cpu: 1500m
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          securityContext:
+            readOnlyRootFilesystem: true
+            privileged: false
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["all"]
+            seccompProfile:
+              type: RuntimeDefault
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: dynatrace-activegate-synthetic-hpa
+  namespace: dynatrace
+  labels:
+    activegate: synthetic
+    syntheticLocationId: SYNTHETIC_LOCATION-13C80238C1DF1F0F
+spec:
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 600
+      selectPolicy: "Min"
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 600
+      selectPolicy: "Min"
+  minReplicas: 1
+  maxReplicas: 1
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: dynatrace-activegate-synthetic
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: "dsfm:synthetic.engine_utilization:filter(eq(\"dt.entity.synthetic_location\",\"SYNTHETIC_LOCATION-13C80238C1DF1F0F\")):merge(\"host.name\",\"dt.active_gate.working_mode\",\"dt.active_gate.id\",\"location.name\"):fold(avg)"
+        target:
+          type: Value
+          value: 80
